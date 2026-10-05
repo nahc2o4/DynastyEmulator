@@ -1,0 +1,14 @@
+{
+  "name": "dynasty-simulator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "build:pages": "node scripts/build-pages.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "preview:pages": "node scripts/preview-pages.mjs",
+    "check": "node --check server.mjs && node --check public/app.js && node --check lib/engine.mjs && node --check lib/agent.mjs && node --check lib/model.mjs && node --check lib/model-core.mjs && node --check lib/model-transport.mjs && node --check lib/save-validation.mjs && node --check lib/random.mjs && node --check public/browser/runtime.mjs && node --check public/browser/store.mjs && node --check scripts/build-pages.mjs && node --check scripts/preview-pages.mjs"
+  },
+  "engines": { "node": ">=22" }
+}
