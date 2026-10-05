@@ -10,6 +10,7 @@
     cancelNew: $("cancel-new-game"), newDialog: $("new-game-dialog"),
     actionForm: $("action-form"), actionInput: $("action-input"), send: $("send-action"),
     sleep: $("sleep-button"), chat: $("chat-messages"), feedback: $("turn-feedback"),
+    mobileName: $("mobile-name"), mobileSaveStatus: $("mobile-save-status"), composerHint: $("composer-hint"),
     end: $("end-banner"), graph: $("relationship-graph"), graphContainer: $("graph-container"),
     graphGroup: $("graph-group"), graphDetail: $("graph-detail"),
     people: $("people-list"), peopleSearch: $("people-search"), peopleDetail: $("people-detail"),
@@ -36,6 +37,11 @@
   let graphFrame = null;
   let agentPromise = null;
   let agentLoaded = false;
+  const mobileViewport = window.matchMedia("(max-width: 700px)");
+  const touchComposer = window.matchMedia("(max-width: 700px) and (pointer: coarse)");
+  const visualViewport = window.visualViewport;
+  let restingViewport = null;
+  let keyboardFrame = null;
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -182,7 +188,30 @@
     renderMessages();
     renderFeedback();
   }
+  function updateComposerHint() {
+    if (ui.composerHint) ui.composerHint.textContent = mobileViewport.matches ? "写下诏令，轻点箭头发送" : "Enter 发送 · Shift + Enter 换行";
+    ui.actionInput.setAttribute("enterkeyhint", touchComposer.matches ? "enter" : "send");
+  }
+  function updateMobileLayout() {
+    updateComposerHint();
+    if (!visualViewport || keyboardFrame !== null) return;
+    keyboardFrame = requestAnimationFrame(() => {
+      keyboardFrame = null;
+      const width = window.innerWidth;
+      const orientation = window.screen.orientation?.type || "";
+      const editing = Boolean(document.activeElement?.matches("input, textarea"));
+      if (restingViewport && (Math.abs(width - restingViewport.width) > 40 || orientation !== restingViewport.orientation)) restingViewport = null;
+      if (!editing) {
+        const height = Math.max(window.innerHeight, visualViewport.height);
+        if (!restingViewport) restingViewport = { width, height, orientation };
+        else restingViewport.height = Math.max(restingViewport.height, height);
+      }
+      const keyboardOpen = touchComposer.matches && editing && restingViewport && Math.abs(visualViewport.scale - 1) < 0.05 && restingViewport.height - visualViewport.height > 150;
+      document.body.classList.toggle("keyboard-open", Boolean(keyboardOpen));
+    });
+  }
   function updateControls() {
+    updateComposerHint();
     const busy = Boolean(state.operation || state.serverBusy);
     const locked = actionLocked();
     ui.send.disabled = locked;
@@ -215,6 +244,10 @@
     const saveIndicator = element("i");
     saveIndicator.setAttribute("aria-hidden", "true");
     $("save-status").replaceChildren(saveIndicator, document.createTextNode(saveText));
+    if (ui.mobileSaveStatus) {
+      ui.mobileSaveStatus.textContent = state.pendingAction && state.operation !== "action" ? "待确认" : busy ? "处理中" : "已保存";
+      ui.mobileSaveStatus.title = saveText;
+    }
   }
 
   function populateSettings() {
@@ -318,6 +351,7 @@
     if (focus) {
       $("view-title").setAttribute("tabindex", "-1");
       $("view-title").focus({ preventScroll: true });
+      if (mobileViewport.matches) $("view-title").scrollIntoView({ block: "start", behavior: "auto" });
     }
   }
   function showOnboarding(reset) {
@@ -328,7 +362,8 @@
     }
     state.mode = "onboarding";
     renderLayout();
-    ui.name.focus({ preventScroll: true });
+    if (mobileViewport.matches) ui.onboarding.scrollIntoView({ block: "start", behavior: "auto" });
+    if (!touchComposer.matches) ui.name.focus({ preventScroll: true });
   }
   function openNewGame() {
     if (!state.game || state.operation || state.serverBusy || state.pendingAction || state.uncertainStart) return;
@@ -369,6 +404,7 @@
     const game = state.game;
     const emperor = personById("emperor");
     $("sidebar-name").textContent = game.name;
+    if (ui.mobileName) { ui.mobileName.textContent = game.name; ui.mobileName.title = game.name; }
     $("sidebar-monogram").textContent = [...game.name][0] || "帝";
     ui.shell.querySelector(".reign-identity small").textContent = `${game.dynasty} · ${game.ended ? "本朝纪念" : "当朝天子"}`;
     $("game-date").textContent = game.date;
@@ -515,9 +551,13 @@
       renderPeople();
     }
     const detail = targetView === "graph" ? ui.graphDetail : ui.peopleDetail;
+    focusProfile(detail);
+    if (!mobileViewport.matches && window.matchMedia("(max-width: 950px)").matches) detail.scrollIntoView({ block: "nearest", behavior: "auto" });
+  }
+  function focusProfile(detail) {
     const heading = detail.querySelector("h2");
     if (heading) { heading.setAttribute("tabindex", "-1"); heading.focus({ preventScroll: true }); }
-    if (window.matchMedia("(max-width: 950px)").matches) detail.scrollIntoView({ block: "nearest", behavior: "auto" });
+    if (mobileViewport.matches) detail.scrollIntoView({ block: "start", behavior: "auto" });
   }
   function renderProfile(container, id, context) {
     const person = personById(id);
@@ -579,9 +619,7 @@
       const card = button("", `person-card${selected ? " selected" : ""}`, () => {
         state.selectedPerson = person.id;
         renderPeople();
-        const heading = ui.peopleDetail.querySelector("h2");
-        heading.setAttribute("tabindex", "-1");
-        heading.focus({ preventScroll: true });
+        focusProfile(ui.peopleDetail);
       });
       card.setAttribute("aria-pressed", String(selected));
       card.setAttribute("aria-label", `${person.name}，${person.role}，查看已知档案`);
@@ -649,6 +687,7 @@
       const choose = (keyboard) => {
         state.selectedPerson = person.id;
         renderGraph();
+        if (!keyboard && mobileViewport.matches) focusProfile(ui.graphDetail);
         if (keyboard) Array.from(ui.graph.querySelectorAll("[data-person-id]")).find((item) => item.getAttribute("data-person-id") === person.id)?.focus();
       };
       node.addEventListener("click", () => choose(false));
@@ -823,7 +862,7 @@
       setOperation("");
       renderMessages();
       renderFeedback();
-      if (!actionLocked() && state.mode === "game" && state.view === "study") ui.actionInput.focus({ preventScroll: true });
+      if (!touchComposer.matches && !actionLocked() && state.mode === "game" && state.view === "study") ui.actionInput.focus({ preventScroll: true });
     }
   }
   function submitAction(text, source) {
@@ -884,12 +923,13 @@
       }
     } finally {
       setOperation("");
-      if (state.mode === "game") ui.actionInput.focus({ preventScroll: true });
+      if (mobileViewport.matches && state.mode === "game") ui.shell.scrollIntoView({ block: "start", behavior: "auto" });
+      if (!touchComposer.matches && state.mode === "game") ui.actionInput.focus({ preventScroll: true });
     }
   });
   ui.actionForm.addEventListener("submit", (event) => { event.preventDefault(); submitAction(ui.actionInput.value, "composer"); });
   ui.actionInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
+    if (event.key === "Enter" && !touchComposer.matches && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
       event.preventDefault();
       if (!actionLocked()) ui.actionForm.requestSubmit();
     }
@@ -905,12 +945,14 @@
     state.view = state.previousView;
     renderGame();
     renderLayout();
+    if (mobileViewport.matches) $("view-title").scrollIntoView({ block: "start", behavior: "auto" });
   });
   $("start-settings").addEventListener("click", () => {
     state.mode = "pregame";
     renderLayout();
     $("view-title").setAttribute("tabindex", "-1");
     $("view-title").focus({ preventScroll: true });
+    if (mobileViewport.matches) $("view-title").scrollIntoView({ block: "start", behavior: "auto" });
   });
   ui.peopleSearch.addEventListener("input", renderPeople);
   ui.graphGroup.addEventListener("change", renderGraph);
@@ -933,6 +975,19 @@
   });
   ui.fixedAgent.closest("details").addEventListener("toggle", (event) => { if (event.currentTarget.open) loadAgent(); });
   window.addEventListener("pagehide", () => { ui.key.value = ""; });
+  window.addEventListener("resize", updateMobileLayout);
+  touchComposer.addEventListener("change", updateMobileLayout);
+  if (visualViewport) {
+    visualViewport.addEventListener("resize", updateMobileLayout);
+    document.addEventListener("focusin", updateMobileLayout);
+    document.addEventListener("focusout", updateMobileLayout);
+    window.addEventListener("orientationchange", () => {
+      restingViewport = null;
+      document.body.classList.remove("keyboard-open");
+      updateMobileLayout();
+    });
+  }
+  updateMobileLayout();
   if (typeof ResizeObserver === "function") {
     const observer = new ResizeObserver(() => {
       if (state.mode === "game" && state.view === "graph" && Math.max(580, Math.round(ui.graphContainer.clientWidth)) !== state.graphWidth) scheduleGraphRender();
